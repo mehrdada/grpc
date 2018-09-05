@@ -417,6 +417,36 @@ grpc_arg grpc_ssl_session_cache_create_channel_arg(
 
 namespace grpc_core {
 
+RefCountedPtr<ClientSslConfig> ClientSslConfig::Create(
+    const char* pem_root_certs, grpc_ssl_pem_key_cert_pair* pem_key_cert_pair) {
+  return MakeRefCounted<ClientSslConfig>(pem_root_certs, pem_key_cert_pair);
+}
+
+ClientSslConfig::ClientSslConfig(
+    const char* pem_root_certs, grpc_ssl_pem_key_cert_pair* pem_key_cert_pair) {
+  if (pem_root_certs != nullptr) {
+    pem_root_certs_ = gpr_strdup(pem_root_certs);
+  }
+  if (pem_key_cert_pair != nullptr) {
+    GPR_ASSERT(pem_key_cert_pair->private_key != nullptr);
+    GPR_ASSERT(pem_key_cert_pair->cert_chain != nullptr);
+    pem_key_cert_pair_ = static_cast<tsi_ssl_pem_key_cert_pair*>(
+        gpr_zalloc(sizeof(tsi_ssl_pem_key_cert_pair)));
+    pem_key_cert_pair_->cert_chain = gpr_strdup(pem_key_cert_pair->cert_chain);
+    pem_key_cert_pair_->private_key =
+        gpr_strdup(pem_key_cert_pair->private_key);
+  }
+}
+
+ClientSslConfig::~ClientSslConfig() {
+  gpr_free(pem_root_certs_);
+  if (pem_key_cert_pair_ != nullptr) {
+    gpr_free((void*)pem_key_cert_pair_->cert_chain);
+    gpr_free((void*)pem_key_cert_pair_->private_key);
+    gpr_free(pem_key_cert_pair_);
+  }
+}
+
 tsi_ssl_root_certs_store* DefaultSslRootStore::default_root_store_;
 grpc_slice DefaultSslRootStore::default_pem_root_certs_;
 

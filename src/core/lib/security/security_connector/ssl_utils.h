@@ -27,6 +27,7 @@
 #include <grpc/slice_buffer.h>
 
 #include "src/core/lib/gprpp/global_config.h"
+#include "src/core/lib/gprpp/ref_counted.h"
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/security/security_connector/security_connector.h"
@@ -91,8 +92,43 @@ tsi_peer grpc_shallow_peer_from_ssl_auth_context(
 void grpc_shallow_peer_destruct(tsi_peer* peer);
 int grpc_ssl_host_matches_name(const tsi_peer* peer, const char* peer_name);
 
-/* --- Default SSL Root Store. --- */
 namespace grpc_core {
+
+class ClientSslConfig : public RefCounted<ClientSslConfig> {
+ public:
+  static RefCountedPtr<ClientSslConfig> Create(
+      const char* pem_root_certs,
+      grpc_ssl_pem_key_cert_pair* pem_key_cert_pair);
+
+  const char* GetPemRootCerts() const { return pem_root_certs_; }
+
+  tsi_ssl_pem_key_cert_pair* GetPemKeyCertPair() const {
+    return pem_key_cert_pair_;
+  }
+
+ private:
+  // So New() can call our private ctor.
+  template <typename T2, typename... Args>
+  friend T2* New(Args&&... args);
+
+  // So Delete() can call our private dtor.
+  template <typename T2>
+  friend void Delete(T2*);
+
+  ClientSslConfig(const char* pem_root_certs,
+                  grpc_ssl_pem_key_cert_pair* pem_key_cert_pair);
+  ~ClientSslConfig();
+
+  char* pem_root_certs_ = nullptr;
+  tsi_ssl_pem_key_cert_pair* pem_key_cert_pair_ = nullptr;
+};
+
+struct VersionedClientSslConfig {
+  int version;
+  RefCountedPtr<ClientSslConfig> config;
+};
+
+/* --- Default SSL Root Store. --- */
 
 // The class implements default SSL root store.
 class DefaultSslRootStore {

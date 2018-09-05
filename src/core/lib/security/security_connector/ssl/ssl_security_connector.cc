@@ -66,7 +66,8 @@ class grpc_ssl_channel_security_connector final
   grpc_ssl_channel_security_connector(
       grpc_core::RefCountedPtr<grpc_channel_credentials> channel_creds,
       grpc_core::RefCountedPtr<grpc_call_credentials> request_metadata_creds,
-      const grpc_ssl_config* config, const char* target_name,
+      tsi_ssl_session_cache* ssl_session_cache,
+      const verify_peer_options* verify_options, const char* target_name,
       const char* overridden_target_name)
       : grpc_channel_security_connector(GRPC_SSL_URL_SCHEME,
                                         std::move(channel_creds),
@@ -74,37 +75,31 @@ class grpc_ssl_channel_security_connector final
         overridden_target_name_(overridden_target_name == nullptr
                                     ? nullptr
                                     : gpr_strdup(overridden_target_name)),
-        verify_options_(&config->verify_options) {
+        session_cache_(ssl_session_cache),
+        verify_options_(verify_options) {
     char* port;
     gpr_split_host_port(target_name, &target_name_, &port);
     gpr_free(port);
+    if (session_cache_ != nullptr) tsi_ssl_session_cache_ref(session_cache_);
   }
 
   ~grpc_ssl_channel_security_connector() override {
     tsi_ssl_client_handshaker_factory_unref(client_handshaker_factory_);
     if (target_name_ != nullptr) gpr_free(target_name_);
     if (overridden_target_name_ != nullptr) gpr_free(overridden_target_name_);
+    if (session_cache_ != nullptr) tsi_ssl_session_cache_unref(session_cache_);
   }
 
-  grpc_security_status InitializeHandshakerFactory(
-      const grpc_ssl_config* config, const char* pem_root_certs,
-      const tsi_ssl_root_certs_store* root_store,
-      tsi_ssl_session_cache* ssl_session_cache) {
-    bool has_key_cert_pair =
-        config->pem_key_cert_pair != nullptr &&
-        config->pem_key_cert_pair->private_key != nullptr &&
-        config->pem_key_cert_pair->cert_chain != nullptr;
+  grpc_security_status InitializeHandshakerFactory() {
+    auto versioned_config =
+        static_cast<grpc_ssl_credentials*>(mutable_channel_creds())
+            ->TryFetchCertConfig();
     tsi_ssl_client_handshaker_options options;
-    GPR_DEBUG_ASSERT(pem_root_certs != nullptr);
-    options.pem_root_certs = pem_root_certs;
-    options.root_store = root_store;
-    options.alpn_protocols =
-        grpc_fill_alpn_protocol_strings(&options.num_alpn_protocols);
-    if (has_key_cert_pair) {
-      options.pem_key_cert_pair = config->pem_key_cert_pair;
+    memset(&options, 0, sizeof(options));
+    if (!fill_ssl_client_handshaker_options(versioned_config.config,
+                                            session_cache_, &options)) {
+      return GRPC_SECURITY_ERROR;
     }
-    options.cipher_suites = grpc_get_ssl_cipher_suites();
-    options.session_cache = ssl_session_cache;
     const tsi_result result =
         tsi_create_ssl_client_handshaker_factory_with_options(
             &options, &client_handshaker_factory_);
@@ -120,6 +115,7 @@ class grpc_ssl_channel_security_connector final
   void add_handshakers(grpc_pollset_set* interested_parties,
                        grpc_core::HandshakeManager* handshake_mgr) override {
     // Instantiate TSI handshaker.
+    maybe_refresh_ssl_channel_credentials();
     tsi_handshaker* tsi_hs = nullptr;
     tsi_result result = tsi_ssl_client_handshaker_factory_create_handshaker(
         client_handshaker_factory_,
@@ -211,9 +207,95 @@ class grpc_ssl_channel_security_connector final
   }
 
  private:
+  static bool fill_ssl_client_handshaker_options(
+      const grpc_core::RefCountedPtr<grpc_core::ClientSslConfig>& config,
+      tsi_ssl_session_cache* ssl_session_cache,
+      tsi_ssl_client_handshaker_options* options) {
+    GPR_ASSERT(config != nullptr);
+    if (config->GetPemRootCerts() == nullptr) {
+      // Use default root certificates.
+      options->pem_root_certs =
+          grpc_core::DefaultSslRootStore::GetPemRootCerts();
+      options->root_store = grpc_core::DefaultSslRootStore::GetRootStore();
+      if (options->pem_root_certs == nullptr) {
+        gpr_log(GPR_ERROR, "Could not get default pem root certs.");
+        return false;
+      }
+    } else {
+      options->pem_root_certs = config->GetPemRootCerts();
+    }
+    GPR_DEBUG_ASSERT(options->pem_root_certs != nullptr);
+    options->alpn_protocols =
+        grpc_fill_alpn_protocol_strings(&options->num_alpn_protocols);
+    auto pem_key_cert_pair = config->GetPemKeyCertPair();
+    bool has_key_cert_pair = pem_key_cert_pair != nullptr &&
+                             pem_key_cert_pair->private_key != nullptr &&
+                             pem_key_cert_pair->cert_chain != nullptr;
+    if (has_key_cert_pair) {
+      options->pem_key_cert_pair = pem_key_cert_pair;
+    }
+    options->cipher_suites = grpc_get_ssl_cipher_suites();
+    options->session_cache = ssl_session_cache;
+    return true;
+  }
+
+  /* Attempts to replace the channel_handshaker_factory with a new factory using
+   * the provided grpc_ssl_channel_certificate_config. Should new factory
+   * creation fail, the existing factory will not be replaced. Returns true on
+   * success (new factory created). */
+  bool try_replace_channel_handshaker_factory(
+      const grpc_core::VersionedClientSslConfig& config) {
+    if (config.config == nullptr) {
+      gpr_log(GPR_ERROR,
+              "Server certificate config callback returned invalid (NULL) "
+              "config.");
+      return false;
+    }
+    if (config.version == config_.version) {
+      // The same config, skip.
+      gpr_log(GPR_DEBUG, "Using the shame channel certificate config (%p, %d).",
+              config.config.get(), config.version);
+      return false;
+    }
+    gpr_log(GPR_DEBUG, "Using new channel certificate config (%p, %d).",
+            config.config.get(), config.version);
+
+    tsi_ssl_client_handshaker_options options;
+    memset(&options, 0, sizeof(options));
+    if (!fill_ssl_client_handshaker_options(config.config, session_cache_,
+                                            &options)) {
+      return false;
+    }
+
+    tsi_ssl_client_handshaker_factory* new_handshaker_factory = nullptr;
+    tsi_result result = tsi_create_ssl_client_handshaker_factory_with_options(
+        &options, &new_handshaker_factory);
+    gpr_free((void*)options.alpn_protocols);
+
+    if (result != TSI_OK) {
+      gpr_log(GPR_ERROR, "Handshaker factory creation failed with %s.",
+              tsi_result_to_string(result));
+      return false;
+    }
+    tsi_ssl_client_handshaker_factory_unref(client_handshaker_factory_);
+    client_handshaker_factory_ = new_handshaker_factory;
+    config_ = config;
+    return true;
+  }
+
+  /* Tries to fetch new credentials. On success rebuilds handshaker factory. */
+  void maybe_refresh_ssl_channel_credentials() {
+    auto versioned_config =
+        static_cast<grpc_ssl_credentials*>(mutable_channel_creds())
+            ->TryFetchCertConfig();
+    try_replace_channel_handshaker_factory(versioned_config);
+  }
+
   tsi_ssl_client_handshaker_factory* client_handshaker_factory_;
+  grpc_core::VersionedClientSslConfig config_;
   char* target_name_;
   char* overridden_target_name_;
+  tsi_ssl_session_cache* session_cache_;
   const verify_peer_options* verify_options_;
 };
 
@@ -399,40 +481,61 @@ class grpc_ssl_server_security_connector
 };
 }  // namespace
 
+grpc_ssl_channel_certificate_config* grpc_ssl_channel_certificate_config_create(
+    const char* pem_root_certs,
+    const grpc_ssl_pem_key_cert_pair* pem_key_cert_pairs) {
+  grpc_ssl_channel_certificate_config* config =
+      static_cast<grpc_ssl_channel_certificate_config*>(
+          gpr_zalloc(sizeof(grpc_ssl_channel_certificate_config)));
+  if (pem_root_certs != nullptr) {
+    config->pem_root_certs = gpr_strdup(pem_root_certs);
+  }
+  if (pem_key_cert_pairs != nullptr) {
+    config->pem_key_cert_pair = static_cast<grpc_ssl_pem_key_cert_pair*>(
+        gpr_zalloc(sizeof(grpc_ssl_pem_key_cert_pair)));
+    config->pem_key_cert_pair->cert_chain =
+        gpr_strdup(pem_key_cert_pairs->cert_chain);
+    config->pem_key_cert_pair->private_key =
+        gpr_strdup(pem_key_cert_pairs->private_key);
+  }
+  return config;
+}
+
+void grpc_ssl_channel_certificate_config_destroy(
+    grpc_ssl_channel_certificate_config* config) {
+  if (config == nullptr) return;
+  if (config->pem_key_cert_pair != nullptr) {
+    gpr_free((void*)config->pem_key_cert_pair->private_key);
+    gpr_free((void*)config->pem_key_cert_pair->cert_chain);
+    gpr_free(config->pem_key_cert_pair);
+  }
+  gpr_free(config->pem_root_certs);
+  gpr_free(config);
+}
+
 grpc_core::RefCountedPtr<grpc_channel_security_connector>
 grpc_ssl_channel_security_connector_create(
     grpc_core::RefCountedPtr<grpc_channel_credentials> channel_creds,
     grpc_core::RefCountedPtr<grpc_call_credentials> request_metadata_creds,
-    const grpc_ssl_config* config, const char* target_name,
-    const char* overridden_target_name,
-    tsi_ssl_session_cache* ssl_session_cache) {
-  if (config == nullptr || target_name == nullptr) {
+    const char* target_name, const char* overridden_target_name,
+    tsi_ssl_session_cache* ssl_session_cache,
+    const verify_peer_options* verify_options) {
+  GPR_ASSERT(channel_creds != nullptr);
+  auto versioned_config =
+      static_cast<grpc_ssl_credentials*>(channel_creds.get())
+          ->TryFetchCertConfig();
+  if (versioned_config.config == nullptr || target_name == nullptr) {
     gpr_log(GPR_ERROR, "An ssl channel needs a config and a target name.");
     return nullptr;
   }
 
-  const char* pem_root_certs;
-  const tsi_ssl_root_certs_store* root_store;
-  if (config->pem_root_certs == nullptr) {
-    // Use default root certificates.
-    pem_root_certs = grpc_core::DefaultSslRootStore::GetPemRootCerts();
-    if (pem_root_certs == nullptr) {
-      gpr_log(GPR_ERROR, "Could not get default pem root certs.");
-      return nullptr;
-    }
-    root_store = grpc_core::DefaultSslRootStore::GetRootStore();
-  } else {
-    pem_root_certs = config->pem_root_certs;
-    root_store = nullptr;
-  }
-
   grpc_core::RefCountedPtr<grpc_ssl_channel_security_connector> c =
       grpc_core::MakeRefCounted<grpc_ssl_channel_security_connector>(
-          std::move(channel_creds), std::move(request_metadata_creds), config,
-          target_name, overridden_target_name);
-  const grpc_security_status result = c->InitializeHandshakerFactory(
-      config, pem_root_certs, root_store, ssl_session_cache);
-  if (result != GRPC_SECURITY_OK) {
+          std::move(channel_creds), std::move(request_metadata_creds),
+          ssl_session_cache, verify_options, target_name,
+          overridden_target_name);
+  const grpc_security_status retval = c->InitializeHandshakerFactory();
+  if (retval != GRPC_SECURITY_OK) {
     return nullptr;
   }
   return c;

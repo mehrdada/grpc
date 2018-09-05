@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "src/core/lib/channel/channel_args.h"
+#include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/surface/api_trace.h"
 #include "src/core/tsi/ssl_transport_security.h"
 
@@ -47,17 +48,38 @@ void grpc_tsi_ssl_pem_key_cert_pairs_destroy(tsi_ssl_pem_key_cert_pair* kp,
 grpc_ssl_credentials::grpc_ssl_credentials(
     const char* pem_root_certs, grpc_ssl_pem_key_cert_pair* pem_key_cert_pair,
     const verify_peer_options* verify_options)
+    : grpc_ssl_credentials(verify_options) {
+  config_.version = 1;
+  config_.config =
+      grpc_core::ClientSslConfig::Create(pem_root_certs, pem_key_cert_pair);
+}
+
+grpc_ssl_credentials::grpc_ssl_credentials(
+    grpc_ssl_channel_certificate_config_callback cb, void* user_data,
+    const verify_peer_options* verify_options)
+    : grpc_ssl_credentials(verify_options) {
+  config_.version = 1;
+  certificate_config_fetcher_ = {cb, user_data};
+}
+
+grpc_ssl_credentials::grpc_ssl_credentials(
+    const verify_peer_options* verify_options)
     : grpc_channel_credentials(GRPC_CHANNEL_CREDENTIALS_TYPE_SSL) {
-  build_config(pem_root_certs, pem_key_cert_pair, verify_options);
+  gpr_mu_init(&lock_);
+  if (verify_options != nullptr) {
+    memcpy(&verify_options_, verify_options, sizeof(verify_options_));
+  } else {
+    memset(&verify_options_, 0, sizeof(verify_options_));
+  }
+  certificate_config_fetcher_ = {nullptr, nullptr};
 }
 
 grpc_ssl_credentials::~grpc_ssl_credentials() {
-  gpr_free(config_.pem_root_certs);
-  grpc_tsi_ssl_pem_key_cert_pairs_destroy(config_.pem_key_cert_pair, 1);
-  if (config_.verify_options.verify_peer_destruct != nullptr) {
-    config_.verify_options.verify_peer_destruct(
-        config_.verify_options.verify_peer_callback_userdata);
+  if (verify_options_.verify_peer_destruct != nullptr) {
+    verify_options_.verify_peer_destruct(
+        verify_options_.verify_peer_callback_userdata);
   }
+  gpr_mu_destroy(&lock_);
 }
 
 grpc_core::RefCountedPtr<grpc_channel_security_connector>
@@ -81,8 +103,8 @@ grpc_ssl_credentials::create_security_connector(
   }
   grpc_core::RefCountedPtr<grpc_channel_security_connector> sc =
       grpc_ssl_channel_security_connector_create(
-          this->Ref(), std::move(call_creds), &config_, target,
-          overridden_target_name, ssl_session_cache);
+          this->Ref(), std::move(call_creds), target, overridden_target_name,
+          ssl_session_cache, &verify_options_);
   if (sc == nullptr) {
     return sc;
   }
@@ -92,29 +114,31 @@ grpc_ssl_credentials::create_security_connector(
   return sc;
 }
 
-void grpc_ssl_credentials::build_config(
-    const char* pem_root_certs, grpc_ssl_pem_key_cert_pair* pem_key_cert_pair,
-    const verify_peer_options* verify_options) {
-  config_.pem_root_certs = gpr_strdup(pem_root_certs);
-  if (pem_key_cert_pair != nullptr) {
-    GPR_ASSERT(pem_key_cert_pair->private_key != nullptr);
-    GPR_ASSERT(pem_key_cert_pair->cert_chain != nullptr);
-    config_.pem_key_cert_pair = static_cast<tsi_ssl_pem_key_cert_pair*>(
-        gpr_zalloc(sizeof(tsi_ssl_pem_key_cert_pair)));
-    config_.pem_key_cert_pair->cert_chain =
-        gpr_strdup(pem_key_cert_pair->cert_chain);
-    config_.pem_key_cert_pair->private_key =
-        gpr_strdup(pem_key_cert_pair->private_key);
-  } else {
-    config_.pem_key_cert_pair = nullptr;
+grpc_core::VersionedClientSslConfig grpc_ssl_credentials::TryFetchCertConfig() {
+  grpc_core::MutexLock guard(&lock_);
+  if (certificate_config_fetcher_.cb != nullptr) {
+    grpc_ssl_channel_certificate_config* certificate_config = nullptr;
+    grpc_ssl_certificate_config_reload_status cb_result =
+        certificate_config_fetcher_.cb(certificate_config_fetcher_.user_data,
+                                       &certificate_config);
+    if (cb_result == GRPC_SSL_CERTIFICATE_CONFIG_RELOAD_UNCHANGED) {
+      gpr_log(GPR_DEBUG, "No change in SSL channel credentials.");
+    } else if (cb_result == GRPC_SSL_CERTIFICATE_CONFIG_RELOAD_NEW) {
+      config_.config = grpc_core::ClientSslConfig::Create(
+          certificate_config->pem_root_certs,
+          certificate_config->pem_key_cert_pair);
+      config_.version++;
+    } else {
+      // Log error, continue using previously-loaded credentials.
+      gpr_log(GPR_ERROR,
+              "Failed fetching new channel credentials, continuing to "
+              "use previously-loaded credentials.");
+    }
+    if (certificate_config != nullptr) {
+      grpc_ssl_channel_certificate_config_destroy(certificate_config);
+    }
   }
-  if (verify_options != nullptr) {
-    memcpy(&config_.verify_options, verify_options,
-           sizeof(verify_peer_options));
-  } else {
-    // Otherwise set all options to default values
-    memset(&config_.verify_options, 0, sizeof(verify_peer_options));
-  }
+  return config_;
 }
 
 grpc_channel_credentials* grpc_ssl_credentials_create(
@@ -130,6 +154,24 @@ grpc_channel_credentials* grpc_ssl_credentials_create(
 
   return grpc_core::New<grpc_ssl_credentials>(pem_root_certs, pem_key_cert_pair,
                                               verify_options);
+}
+
+grpc_channel_credentials* grpc_ssl_credentials_create_using_config_fetcher(
+    grpc_ssl_channel_certificate_config_callback cb, void* user_data,
+    const verify_peer_options* verify_options, void* reserved) {
+  if (cb == nullptr) {
+    gpr_log(GPR_ERROR, "Invalid certificate config callback parameter.");
+    return nullptr;
+  }
+  GRPC_API_TRACE(
+      "grpc_ssl_credentials_create_using_config_fetcher(cb=%p, "
+      "user_data=%p, "
+      "verify_options=%p, "
+      "reserved=%p)",
+      4, (cb, user_data, verify_options, reserved));
+  GPR_ASSERT(reserved == nullptr);
+
+  return grpc_core::New<grpc_ssl_credentials>(cb, user_data, verify_options);
 }
 
 //

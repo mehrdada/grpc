@@ -23,11 +23,25 @@
 #include "src/core/lib/security/credentials/credentials.h"
 
 #include "src/core/lib/security/security_connector/ssl/ssl_security_connector.h"
+#include "src/core/lib/security/security_connector/ssl_utils.h"
+
+struct grpc_ssl_channel_certificate_config {
+  grpc_ssl_pem_key_cert_pair* pem_key_cert_pair;
+  char* pem_root_certs;
+};
+
+typedef struct {
+  grpc_ssl_channel_certificate_config_callback cb;
+  void* user_data;
+} grpc_ssl_channel_certificate_config_fetcher;
 
 class grpc_ssl_credentials : public grpc_channel_credentials {
  public:
   grpc_ssl_credentials(const char* pem_root_certs,
                        grpc_ssl_pem_key_cert_pair* pem_key_cert_pair,
+                       const verify_peer_options* verify_options);
+  grpc_ssl_credentials(grpc_ssl_channel_certificate_config_callback cb,
+                       void* user_data,
                        const verify_peer_options* verify_options);
 
   ~grpc_ssl_credentials() override;
@@ -38,12 +52,19 @@ class grpc_ssl_credentials : public grpc_channel_credentials {
       const char* target, const grpc_channel_args* args,
       grpc_channel_args** new_args) override;
 
- private:
-  void build_config(const char* pem_root_certs,
-                    grpc_ssl_pem_key_cert_pair* pem_key_cert_pair,
-                    const verify_peer_options* verify_options);
+  /* Attempts to fetch the channel certificate config if a callback is
+   * available. Current certificate config will continue to be used if the
+   * callback returns an error.
+   */
+  grpc_core::VersionedClientSslConfig TryFetchCertConfig();
 
-  grpc_ssl_config config_;
+ private:
+  grpc_ssl_credentials(const verify_peer_options* verify_options);
+
+  gpr_mu lock_;
+  grpc_core::VersionedClientSslConfig config_;
+  grpc_ssl_channel_certificate_config_fetcher certificate_config_fetcher_;
+  verify_peer_options verify_options_;
 };
 
 struct grpc_ssl_server_certificate_config {

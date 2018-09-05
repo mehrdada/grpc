@@ -52,9 +52,9 @@ grpc_core::RefCountedPtr<grpc_channel_security_connector>
 grpc_ssl_channel_security_connector_create(
     grpc_core::RefCountedPtr<grpc_channel_credentials> channel_creds,
     grpc_core::RefCountedPtr<grpc_call_credentials> request_metadata_creds,
-    const grpc_ssl_config* config, const char* target_name,
-    const char* overridden_target_name,
-    tsi_ssl_session_cache* ssl_session_cache);
+    const char* target_name, const char* overridden_target_name,
+    tsi_ssl_session_cache* ssl_session_cache,
+    const verify_peer_options* verify_options);
 
 /* Config for ssl servers. */
 typedef struct {
