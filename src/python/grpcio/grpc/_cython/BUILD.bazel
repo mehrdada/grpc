@@ -45,8 +45,17 @@ pyx_library(
         "_cygrpc/time.pyx.pxi",
         "cygrpc.pxd",
         "cygrpc.pyx",
-    ],
+        # new files:
+        "cygrpz.pxd",
+        "cygrpz.pyx",
+        "grpcpp.pxd",
+        "grpc.pxd",
+    ] + glob(["libcpp/*.pxd"]),
     deps = [
-       "//:grpc",
+        "//:grpc",
+        "//:grpc++",
+        "//grpz",
+        "//grpz:dummy_server",
     ],
 )
+

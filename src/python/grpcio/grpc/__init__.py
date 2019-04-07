@@ -20,6 +20,7 @@ import sys
 import six
 
 from grpc._cython import cygrpc as _cygrpc
+from grpc._cython import cygrpz as _grpz
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
