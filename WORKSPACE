@@ -37,6 +37,12 @@ git_repository(
     remote = "https://github.com/bazelbuild/rules_python.git",
 )
 
+git_repository(
+    name = "com_github_abseil_abseil_cpp",
+    branch = "master",
+    remote = "https://github.com/abseil/abseil-cpp",
+)
+
 load("@io_bazel_rules_python//python:pip.bzl", "pip_repositories", "pip_import")
 
 pip_repositories()

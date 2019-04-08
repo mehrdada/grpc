@@ -46,8 +46,8 @@ pyx_library(
         "cygrpc.pxd",
         "cygrpc.pyx",
         # new files:
-        "cygrpz.pxd",
-        "cygrpz.pyx",
+        "cygrpz.pxd.pxi",
+        "cygrpz.pyx.pxi",
         "grpcpp.pxd",
         "grpc.pxd",
     ] + glob(["libcpp/*.pxd"]),
@@ -56,6 +56,7 @@ pyx_library(
         "//:grpc++",
         "//grpz",
         "//grpz:dummy_server",
+        "@com_github_abseil_abseil_cpp//absl/memory:memory",
     ],
 )
 

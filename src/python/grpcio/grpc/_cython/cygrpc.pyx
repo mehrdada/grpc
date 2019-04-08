@@ -45,6 +45,9 @@ IF UNAME_SYSNAME == "Windows":
 ELSE:
     include "_cygrpc/fork_posix.pyx.pxi"
 
+
+include "cygrpz.pyx.pxi"
+
 #
 # initialize gRPC
 #

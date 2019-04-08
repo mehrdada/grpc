@@ -1,3 +1,5 @@
+from libcpp.memory cimport make_shared, make_unique
+
 cdef class _BoundPort:
 
     def __cinit__(self):
@@ -46,13 +48,13 @@ cdef class ServerBuilder:
 cdef class ServerCompat:
 
     def __cinit__(self, thread_pool, handlers=None, interceptors=None, options=None, maximum_concurrent_rpcs=None):
-        self._dummy_server = _DummyServer()
+        self._dummy_server = make_unique[_DummyServer]()
         self._bound_addrs = []
         self._builder = ServerBuilder()
         self._server = None
 
     cdef int _add_http2_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds) except *:
-        cdef int bound_port = self._dummy_server.Bind(address)
+        cdef int bound_port = self._dummy_server.get().Bind(address)
         if bound_port <= 0:
             return 0
         adapted_address = '{}:{}'.format(address.rsplit(':', 1)[0], bound_port)

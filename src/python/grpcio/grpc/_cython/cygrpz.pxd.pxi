@@ -1,6 +1,6 @@
 # distutils: language = c++
 
-from libcpp.memory cimport shared_ptr, make_shared
+from libcpp.memory cimport shared_ptr, unique_ptr
 cimport grpcpp
 
 cdef extern from "grpz/dummy_server.h" namespace "grpz":
@@ -8,8 +8,6 @@ cdef extern from "grpz/dummy_server.h" namespace "grpz":
         _DummyServer() except +
         int Bind(const char* addr) except +
 
-cdef class Server:
-    pass
 
 cdef class _Server:
     pass
@@ -26,7 +24,7 @@ cdef class ServerBuilder:
     cdef add_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds)
 
 cdef class ServerCompat:
-    cdef _DummyServer _dummy_server
+    cdef unique_ptr[_DummyServer] _dummy_server
     cdef list _bound_addrs
     cdef ServerBuilder _builder
     cdef Server _server
