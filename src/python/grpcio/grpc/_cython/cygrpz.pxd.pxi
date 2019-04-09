@@ -4,11 +4,15 @@ from libcpp.memory cimport shared_ptr, unique_ptr
 cimport grpcpp
 cimport grpz
 
+cdef class _ServerCall:
+    cdef unique_ptr[grpz.ServerCall] _call
+
 cdef class _RunningServer:
     cdef unique_ptr[grpz.Server] _server
     cdef list _handlers
     cdef list _interceptors
     cdef object _execution_thread
+    cdef void handle_call(_RunningServer self, _ServerCall call) except *
 
 cdef class _BoundPort:
     cdef shared_ptr[int] _port

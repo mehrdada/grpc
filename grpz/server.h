@@ -18,7 +18,6 @@ class Tag {
   std::function<void(bool)> fn_;
 };
 
-
 class ServerCall {
  public:
   grpc::GenericServerAsyncReaderWriter* Stream() {
@@ -34,12 +33,12 @@ class ServerCall {
     return &write_tag_;
   }
 
+
  private:
   void Write(bool) {}
   void Read(bool) {}
-  void Request(bool) {}
-    grpc::GenericServerContext context_;
-    grpc::GenericServerAsyncReaderWriter stream_ = grpc::GenericServerAsyncReaderWriter(&context_);
+  grpc::GenericServerContext context_;
+  grpc::GenericServerAsyncReaderWriter stream_ = grpc::GenericServerAsyncReaderWriter(&context_);
   Tag read_tag_ = Tag([&](bool ok) { Read(ok); });
   Tag write_tag_ = Tag([&](bool ok) { Write(ok); });
 };
@@ -49,9 +48,9 @@ class Server {
  public:
   class PrivateConstructor;
   Server(const PrivateConstructor&, grpc::ServerBuilder& builder, 
-          std::unique_ptr<grpc::ServerCompletionQueue> cq,
-                         std::unique_ptr<grpc::AsyncGenericService> service,
-        std::function<void(void*)> callback, void* tag);
+         std::unique_ptr<grpc::ServerCompletionQueue> cq,
+         std::unique_ptr<grpc::AsyncGenericService> service,
+         std::function<void(std::unique_ptr<ServerCall>, void*)> callback, void* tag);
   ~Server();
   void Loop();
   void Stop();
@@ -63,12 +62,13 @@ class Server {
   std::unique_ptr<grpc::Server> server_;
   std::unique_ptr<grpc::ServerCompletionQueue> cq_;
                  std::unique_ptr<grpc::AsyncGenericService> service_;
-  std::function<void(void*)> callback_;
+  std::function<void(std::unique_ptr<ServerCall>, void*)> callback_;
   void* tag_;
   std::unique_ptr<ServerCall> call_;
 };
 
-std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, std::function<void(void*)> callback, void* tag);
+std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, 
+  std::function<void(std::unique_ptr<ServerCall>, void*)> callback, void* tag);
 
 }
 

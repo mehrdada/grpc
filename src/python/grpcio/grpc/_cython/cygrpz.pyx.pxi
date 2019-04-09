@@ -16,10 +16,13 @@ cdef class _BoundPort:
     def get_port(self):
         return self._final_port
 
-cdef void _handler(void* user_data) nogil:
+
+cdef void _handle_call(unique_ptr[grpz.ServerCall] call, void* user_data) nogil:
     with gil:
+        server_call = _ServerCall()
         running_server = <_RunningServer>user_data
-        running_server.handle_call()
+        <_ServerCall>server_call._call.swap(call)
+        running_server.handle_call(server_call)
 
 cdef class _RunningServer:
 
@@ -41,6 +44,10 @@ cdef class _RunningServer:
         e = threading.Event()
         e.set()
         return e
+
+    cdef void handle_call(_RunningServer self, _ServerCall call) except *:
+        pass
+
 
 cdef class ServerBuilder:
 
@@ -93,7 +100,7 @@ cdef class ServerBuilder:
     cpdef build_and_start(self):
         cdef _RunningServer running_server = _RunningServer(self._handlers, self._interceptors)
         cpython.Py_INCREF(running_server)
-        running_server._server.swap(grpz.BuildAndStartServer(self._builder, _handler, <PyObject*>running_server))
+        running_server._server.swap(grpz.BuildAndStartServer(self._builder, _handle_call, <PyObject*>running_server))
         for bound_port in self._bound_ports:
             bound_port.read_port()
         self._bound_ports = None
