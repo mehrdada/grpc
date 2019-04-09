@@ -1,12 +1,11 @@
 #ifndef GRPZ_SERVER_H_
 #define GRPZ_SERVER_H_
-
+#include <iostream>
 #include "grpcpp/grpcpp.h"
 #include "grpcpp/impl/codegen/grpc_library.h"
 #include "grpcpp/generic/async_generic_service.h"
 
 namespace grpz {
-
 
 class Tag {
  public:
@@ -32,7 +31,21 @@ class ServerCall {
   Tag* WriteTag() {
     return &write_tag_;
   }
-
+  const std::string& Method() {
+    return context_.method();
+  }
+  void Reject() {
+    std::cerr<< "RejecT()"<<std::endl;
+    stream_.Finish(grpc::Status::CANCELLED, nullptr);
+  }
+  void ReadClientMetadata(std::function<void(grpc::string_ref, grpc::string_ref, void*)> reader, void* tag) {
+    for (const auto& pair : context_.client_metadata()) {
+      reader(pair.first, pair.second, tag);
+    }
+  }
+  ~ServerCall() {
+    context_.TryCancel();
+  }
 
  private:
   void Write(bool) {}
@@ -69,6 +82,10 @@ class Server {
 
 std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, 
   std::function<void(std::unique_ptr<ServerCall>, void*)> callback, void* tag);
+
+inline void prin() {
+  std::cerr << "print()" << std::endl;
+}
 
 }
 

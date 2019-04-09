@@ -2,6 +2,18 @@ from libcpp.memory cimport make_shared, make_unique
 cimport cpython
 from cpython cimport PyObject
 import threading
+import logging
+cimport grpcpp
+
+_LOGGER = logging.getLogger(__name__)
+
+import collections
+class _HandlerCallDetails(
+        collections.namedtuple('_HandlerCallDetails', (
+            'method',
+            'invocation_metadata',
+        ))):
+    pass
 
 cdef class _BoundPort:
 
@@ -17,22 +29,55 @@ cdef class _BoundPort:
         return self._final_port
 
 
+cdef void _read_metadata_item(grpcpp.string_ref key, grpcpp.string_ref val, void* list_ptr) nogil:
+    with gil:
+        l = <list><PyObject*>list_ptr
+        k_bytes = key.data()[:key.length()]
+        v_bytes = val.data()[:val.length()]
+        l.append((k_bytes, v_bytes))
+
 cdef void _handle_call(unique_ptr[grpz.ServerCall] call, void* user_data) nogil:
     with gil:
-        server_call = _ServerCall()
-        running_server = <_RunningServer>user_data
-        <_ServerCall>server_call._call.swap(call)
-        running_server.handle_call(server_call)
+        try:
+            _LOGGER.error("_handle_call2")
+            server_call = _ServerCall()
+            _LOGGER.error("_handle_call3")
+            running_server = <_RunningServer>user_data
+            _LOGGER.error("_handle_call4")
+            (<_ServerCall>server_call)._call.swap(call)
+            _LOGGER.error("_handle_call5")
+            running_server.handle_call(server_call)
+        except Exception as ex:
+            _LOGGER.exception(ex)
+
+cdef _find_method_handler(handler_call_details, generic_handlers, interceptor_pipeline):
+
+    def query_handlers(handler_call_details):
+        for generic_handler in generic_handlers:
+            method_handler = generic_handler.service(handler_call_details)
+            if method_handler is not None:
+                return method_handler
+        return None
+
+    if interceptor_pipeline is not None:
+        return interceptor_pipeline.execute(query_handlers,
+                                            handler_call_details)
+    else:
+        return query_handlers(handler_call_details)
 
 cdef class _RunningServer:
 
     def __cinit__(self, handlers, interceptors):
         self._handlers = handlers
-        self._interceptors = interceptors
+        self._interceptor_pipeline = None # _interceptor.service_pipeline(interceptors)
 
     def loop(self):
         def _loop():
-            self._server.get().Loop()
+            cdef grpz.Server* server = self._server.get()
+            _LOGGER.error('Starting loop')
+            with nogil:
+                server.Loop()
+            _LOGGER.error('stopped loop')
             cpython.Py_DECREF(self)
 
         self._execution_thread = threading.Thread(target=_loop)
@@ -40,14 +85,46 @@ cdef class _RunningServer:
         self._execution_thread.start()
 
     def stop(self, grace=None):
-        self._server.reset()
+        with nogil:
+            self._server.reset()
         e = threading.Event()
         e.set()
         return e
 
-    cdef void handle_call(_RunningServer self, _ServerCall call) except *:
-        pass
+    def __dealloc__(self):
+        with nogil:
+            self._server.reset()
 
+    cdef void handle_call(_RunningServer self, _ServerCall call) except *:
+        cdef list metadata = []
+        _LOGGER.error('handle_call(call')
+        call._call.get().ReadClientMetadata(_read_metadata_item, <PyObject*>metadata)
+        call._method = call._call.get().Method()
+        call._metadata = tuple(metadata)
+        method_handler = _find_method_handler(
+            _HandlerCallDetails(call._method, call._metadata),
+            self._handlers, self._interceptor_pipeline)
+        _LOGGER.error('rejecting RPC')
+        call.reject()
+        return
+        if call._method:
+            try:
+                method_handler = _find_method_handler(rpc_event, generic_handlers,
+                                                    interceptor_pipeline)
+            except Exception as exception:  # pylint: disable=broad-except
+                details = 'Exception servicing handler: {}'.format(exception)
+                _LOGGER.exception(details)
+                return _reject_rpc(rpc_event, cygrpc.StatusCode.unknown,
+                                b'Error in service handler!'), None
+            if method_handler is None:
+                return _reject_rpc(rpc_event, cygrpc.StatusCode.unimplemented,
+                                b'Method not found!'), None
+            elif concurrency_exceeded:
+                return _reject_rpc(rpc_event, cygrpc.StatusCode.resource_exhausted,
+                                b'Concurrent RPC limit exceeded!'), None
+            else:
+                return _handle_with_method_handler(rpc_event, method_handler,
+                                                thread_pool)
 
 cdef class ServerBuilder:
 
@@ -150,13 +227,19 @@ cdef class ServerCompat:
             actual_val = actual()
             if expected != actual_val:
                 raise Exception('Failed to start server: race between dummy server and main server initialization: previously bound port[{}]!=newly bound port[{}]'.format(expected, actual_val))
+        _LOGGER.error('start() done')
 
     def stop(self, grace=None):
-        if self._dummy_server:
-            self._dummy_server.reset()
+        with nogil:
+            if self._dummy_server:
+                self._dummy_server.reset()
         if self._server:
             return self._server.stop(grace=grace)
         e = threading.Event()
         e.set()
         return e
 
+
+cdef class _ServerCall:
+    cdef void reject(_ServerCall self):
+        self._call.get().Reject()

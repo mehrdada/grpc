@@ -6,11 +6,14 @@ cimport grpz
 
 cdef class _ServerCall:
     cdef unique_ptr[grpz.ServerCall] _call
+    cdef bytes _method
+    cdef tuple _metadata
+    cdef void reject(_ServerCall self)
 
 cdef class _RunningServer:
     cdef unique_ptr[grpz.Server] _server
     cdef list _handlers
-    cdef list _interceptors
+    cdef object _interceptor_pipeline
     cdef object _execution_thread
     cdef void handle_call(_RunningServer self, _ServerCall call) except *
 

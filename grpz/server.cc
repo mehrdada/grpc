@@ -1,7 +1,7 @@
 #include "grpz/server.h"
 
 #include <utility>
-
+#include <iostream>
 #include "absl/memory/memory.h"
 
 namespace grpz {
@@ -19,7 +19,7 @@ Server::Server(const PrivateConstructor&, grpc::ServerBuilder& builder,
     tag_(tag) {}
 
 void Server::Stop() {
-
+    //server_->Shutdown();
 }
 
 void Server::NewCall() {
@@ -31,7 +31,10 @@ void Server::Request(bool ok) {
     if (ok) {
         auto call = std::move(call_);
         NewCall();
+        // TODO: check if concurrency exceeded before calling back into python
+        std::cerr<< "callback_" << std::endl;
         callback_(std::move(call), tag_);
+        std::cerr<< "callback_new_" << std::endl;
     }
 }
 
@@ -40,16 +43,18 @@ void Server::Loop() {
     void* tag;
     bool ok;
     while (cq_->Next(&tag, &ok)) {
-        static_cast<Tag*>(tag)->Handle(ok);
+        if (tag) {
+            static_cast<Tag*>(tag)->Handle(ok);
+        }
     }
 }
 
 Server::~Server(){
-    server_->Shutdown();
-    cq_->Shutdown();
+    Stop();
     void* tag;
     bool ok;
     while (cq_->Next(&tag, &ok));
+    cq_->Shutdown();
 }
 
   std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, std::function<void(std::unique_ptr<ServerCall>, void*)> callback, void* tag){

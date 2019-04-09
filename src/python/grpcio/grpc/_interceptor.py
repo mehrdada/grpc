@@ -46,8 +46,7 @@ def service_pipeline(interceptors):
 class _ClientCallDetails(
         collections.namedtuple(
             '_ClientCallDetails',
-            ('method', 'timeout', 'metadata', 'credentials', 'wait_for_ready')),
-        grpc.ClientCallDetails):
+            ('method', 'timeout', 'metadata', 'credentials', 'wait_for_ready'))):
     pass
 
 
@@ -80,7 +79,7 @@ def _unwrap_client_call_details(call_details, default_details):
     return method, timeout, metadata, credentials, wait_for_ready
 
 
-class _FailureOutcome(grpc.RpcError, grpc.Future, grpc.Call):
+class _FailureOutcome:
 
     def __init__(self, exception, traceback):
         super(_FailureOutcome, self).__init__()
@@ -142,7 +141,7 @@ class _FailureOutcome(grpc.RpcError, grpc.Future, grpc.Call):
         return self.__next__()
 
 
-class _UnaryOutcome(grpc.Call, grpc.Future):
+class _UnaryOutcome:
 
     def __init__(self, response, call):
         self._response = response
@@ -194,7 +193,7 @@ class _UnaryOutcome(grpc.Call, grpc.Future):
         fn(self)
 
 
-class _UnaryUnaryMultiCallable(grpc.UnaryUnaryMultiCallable):
+class _UnaryUnaryMultiCallable:
 
     def __init__(self, thunk, method, interceptor):
         self._thunk = thunk
