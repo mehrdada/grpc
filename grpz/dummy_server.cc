@@ -1,3 +1,4 @@
+#include <assert.h>
 #include "grpz/dummy_server.h"
 
 namespace grpz {

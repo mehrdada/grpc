@@ -52,7 +52,7 @@ Server::~Server(){
     while (cq_->Next(&tag, &ok));
 }
 
-std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, std::function<void(ServerCall*)> callback, void* tag){
+  std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, std::function<void(void*)> callback, void* tag){
     auto service = absl::make_unique<grpc::AsyncGenericService>();
     builder.RegisterAsyncGenericService(service.get());
     return absl::make_unique<Server>(Server::PrivateConstructor{}, 
