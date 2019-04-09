@@ -1771,8 +1771,8 @@ def server(thread_pool,
     Returns:
       A Server object.
     """
-    from grpc import _server  # pylint: disable=cyclic-import
-    return _server.create_server(thread_pool, ()
+#    from grpc import _server  # pylint: disable=cyclic-import
+    return _cygrpc.ServerCompat(thread_pool, ()
                                  if handlers is None else handlers, ()
                                  if interceptors is None else interceptors, ()
                                  if options is None else options,

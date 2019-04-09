@@ -6,18 +6,23 @@
 
 namespace grpz {
 
-class PrivateConstructor;
 
 class Server {
  public:
-  Server(const PrivateConstructor&, grpc::ServerBuilder& builder, std::unique_ptr<grpc::ServerCompletionQueue> cq);
+  class PrivateConstructor;
+  Server(const PrivateConstructor&, grpc::ServerBuilder& builder, std::unique_ptr<grpc::ServerCompletionQueue> cq, std::function<void(void*)> callback, void* tag);
   ~Server();
+  void Loop();
+  void Stop();
+
  private:
   std::unique_ptr<grpc::Server> server_;
   std::unique_ptr<grpc::ServerCompletionQueue> cq_;
+  std::function<void(void*)> callback_;
+  void* tag_;
 };
 
-std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder);
+std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, std::function<void(void*)> callback, void* tag);
 
 }
 

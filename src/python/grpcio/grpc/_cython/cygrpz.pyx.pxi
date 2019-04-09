@@ -1,4 +1,7 @@
 from libcpp.memory cimport make_shared, make_unique
+cimport cpython
+from cpython cimport PyObject
+import threading
 
 cdef class _BoundPort:
 
@@ -13,10 +16,34 @@ cdef class _BoundPort:
     def get_port(self):
         return self._final_port
 
+cdef void _handler(void* user_data) nogil:
+    with gil:
+        running_server = <_RunningServer>user_data
+        running_server.handle_call()
+
 cdef class _RunningServer:
-    pass
+
+    def __cinit__(self, handlers, interceptors):
+        self._handlers = handlers
+        self._interceptors = interceptors
+
+    def loop(self):
+        def _loop():
+            self._server.get().Loop()
+            cpython.Py_DECREF(self)
+
+        self._execution_thread = threading.Thread(target=_loop)
+        self._execution_thread.daemon = True
+        self._execution_thread.start()
+
+    def stop(self, grace=None):
+        self._server.reset()
+        e = threading.Event()
+        e.set()
+        return e
 
 cdef class ServerBuilder:
+
     def __cinit__(self):
         self._bound_ports = []
         self._handlers = []
@@ -28,13 +55,13 @@ cdef class ServerBuilder:
         self._builder.AddListeningPort(address, creds, port._port.get())
         return port.get_port
 
-    def add_insecure_port(self, address):
+    cpdef add_insecure_port(self, address):
         return self.add_port(address, grpcpp.InsecureServerCredentials())
 
-    def add_secure_port(self, address, ServerCredentialsWrapper credentials):
+    cpdef add_secure_port(self, address, _ServerCredentialsWrapper credentials):
         return self.add_port(address, credentials.credentials)
 
-    def add_generic_rpc_handlers(self, generic_rpc_handlers):
+    cpdef add_generic_rpc_handlers(self, generic_rpc_handlers):
         for generic_rpc_handler in generic_rpc_handlers:
             service_attribute = getattr(generic_rpc_handler, 'service', None)
             if service_attribute is None:
@@ -43,10 +70,10 @@ cdef class ServerBuilder:
                     'not have "service" method!'.format(generic_rpc_handler))
         self._handlers.extend(generic_rpc_handlers)
 
-    def add_interceptors(self, interceptors):
+    cpdef add_interceptors(self, interceptors):
         self._interceptors.extend(interceptors)
 
-    def add_option(self, name, value):
+    cpdef add_option(self, name, value):
         if isinstance(value, int):    
             self._builder.AddIntegerArgument(name, value)
         elif isinstance(value, (bytes, str, unicode)):
@@ -54,11 +81,21 @@ cdef class ServerBuilder:
         else:
             raise ValueError('Invalid option type')
 
-    def build_and_start(self):
-        grpz.BuildAndStartServer(self._builder)
+    cpdef set_max_concurrent_rpcs(self, int maximum_concurrent_rpcs):
+        pass
+
+    cpdef set_submit_handler(self, handler):
+        pass
+
+    cpdef build_and_start(self):
+        cdef _RunningServer running_server = _RunningServer(self._handlers, self._interceptors)
+        cpython.Py_INCREF(running_server)
+        running_server._server.swap(grpz.BuildAndStartServer(self._builder, _handler, <PyObject*>running_server))
         for bound_port in self._bound_ports:
             bound_port.read_port()
         self._bound_ports = None
+        running_server.loop()
+        return running_server
 
 cdef class ServerCompat:
 
@@ -72,7 +109,11 @@ cdef class ServerCompat:
         if options:
             for option, value in options:
                 self._builder.add_option(option, value)
-        
+        if maximum_concurrent_rpcs:
+            self._builder.set_max_concurrent_rpcs(maximum_concurrent_rpcs)
+        if thread_pool:
+            self._builder.set_submit_handler(thread_pool.submit)
+        self._builder.set_completion_queue_count(4)        
 
     cdef int _add_http2_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds) except *:
         cdef int bound_port = self._dummy_server.get().Bind(address)
@@ -89,7 +130,7 @@ cdef class ServerCompat:
     def add_insecure_port(self, address):
         return self._add_http2_port(address, grpcpp.InsecureServerCredentials())        
         
-    def add_secure_port(self, address, ServerCredentialsWrapper server_credentials):
+    def add_secure_port(self, address, _ServerCredentialsWrapper server_credentials):
         return self._add_http2_port(address, server_credentials.credentials)
 
     def start(self):
@@ -99,9 +140,13 @@ cdef class ServerCompat:
             actual_val = actual()
             if expected != actual_val:
                 raise Exception('Failed to start server: race between dummy server and main server initialization: previously bound port[{}]!=newly bound port[{}]'.format(expected, actual_val))
-        self._server.run()
 
-    def stop(self, grace):
+    def stop(self, grace=None):
         if self._dummy_server:
             self._dummy_server.reset()
+        if self._server:
+            return self._server.stop(grace=grace)
+        e = threading.Event()
+        e.set()
+        return e
 

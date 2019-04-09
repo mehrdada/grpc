@@ -5,7 +5,10 @@ cimport grpcpp
 cimport grpz
 
 cdef class _RunningServer:
-    pass
+    cdef unique_ptr[grpz.Server] _server
+    cdef list _handlers
+    cdef list _interceptors
+    cdef object _execution_thread
 
 cdef class _BoundPort:
     cdef shared_ptr[int] _port
@@ -17,6 +20,14 @@ cdef class ServerBuilder:
     cdef list _handlers
     cdef list _interceptors
     cdef add_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds)
+    cpdef add_insecure_port(self, address)
+    cpdef add_secure_port(self, address, _ServerCredentialsWrapper credentials)
+    cpdef add_generic_rpc_handlers(self, generic_rpc_handlers)
+    cpdef add_interceptors(self, interceptors)
+    cpdef add_option(self, name, value)
+    cpdef set_max_concurrent_rpcs(self, int maximum_concurrent_rpcs)
+    cpdef set_submit_handler(self, handler)
+    cpdef build_and_start(self)
 
 cdef class ServerCompat:
     cdef unique_ptr[grpz.DummyServer] _dummy_server
@@ -25,5 +36,5 @@ cdef class ServerCompat:
     cdef _RunningServer _server
     cdef int _add_http2_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds) except *
 
-cdef class ServerCredentialsWrapper:
+cdef class _ServerCredentialsWrapper:
     cdef shared_ptr[grpcpp.ServerCredentials] credentials

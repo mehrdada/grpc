@@ -51,7 +51,6 @@ pyx_library(
         "channel.pxd.pxi",
         "channel.pyx.pxi",
         "grpcpp.pxd",
-        "grpc.pxd",
         "grpz.pxd",
     ] + glob(["libcpp/*.pxd"]),
     deps = [
