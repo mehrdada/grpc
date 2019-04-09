@@ -87,6 +87,9 @@ cdef class ServerBuilder:
     cpdef set_submit_handler(self, handler):
         pass
 
+    cpdef set_thread_count(self, int thread_count):
+        pass
+
     cpdef build_and_start(self):
         cdef _RunningServer running_server = _RunningServer(self._handlers, self._interceptors)
         cpython.Py_INCREF(running_server)
@@ -113,7 +116,7 @@ cdef class ServerCompat:
             self._builder.set_max_concurrent_rpcs(maximum_concurrent_rpcs)
         if thread_pool:
             self._builder.set_submit_handler(thread_pool.submit)
-        self._builder.set_completion_queue_count(4)        
+        self._builder.set_thread_count(4)        
 
     cdef int _add_http2_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds) except *:
         cdef int bound_port = self._dummy_server.get().Bind(address)

@@ -27,6 +27,7 @@ cdef class ServerBuilder:
     cpdef add_option(self, name, value)
     cpdef set_max_concurrent_rpcs(self, int maximum_concurrent_rpcs)
     cpdef set_submit_handler(self, handler)
+    cpdef set_thread_count(self, int thread_count)
     cpdef build_and_start(self)
 
 cdef class ServerCompat:
