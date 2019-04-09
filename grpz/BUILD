@@ -1,9 +1,11 @@
 cc_library(
 	name = "grpz",
 	hdrs = [
+		"channel.h",
 		"server.h",
 	],
 	srcs = [
+		"channel.cc",
 		"server.cc",
 	],
 	visibility = [
@@ -12,6 +14,7 @@ cc_library(
 	deps = [
 		"//:grpc",
 		"//:grpc++",
+        "@com_google_absl//absl/memory:memory",
 	],
 )
 

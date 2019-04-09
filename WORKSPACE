@@ -38,7 +38,7 @@ git_repository(
 )
 
 git_repository(
-    name = "com_github_abseil_abseil_cpp",
+    name = "com_google_absl",
     branch = "master",
     remote = "https://github.com/abseil/abseil-cpp",
 )

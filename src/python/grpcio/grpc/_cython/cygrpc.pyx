@@ -47,6 +47,7 @@ ELSE:
 
 
 include "cygrpz.pyx.pxi"
+include "channel.pyx.pxi"
 
 #
 # initialize gRPC

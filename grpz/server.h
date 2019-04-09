@@ -6,12 +6,18 @@
 
 namespace grpz {
 
-class ServerBuilder {
+class PrivateConstructor;
+
+class Server {
  public:
-    ServerBuilder() {}
+  Server(const PrivateConstructor&, grpc::ServerBuilder& builder, std::unique_ptr<grpc::ServerCompletionQueue> cq);
+  ~Server();
  private:
-    grpc::ServerBuilder builder_;
+  std::unique_ptr<grpc::Server> server_;
+  std::unique_ptr<grpc::ServerCompletionQueue> cq_;
 };
+
+std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder);
 
 }
 

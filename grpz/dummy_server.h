@@ -14,6 +14,7 @@ class DummyServer : private grpc::GrpcLibraryCodegen {
 
  private:
   grpc_server* server_;
+  grpc_completion_queue* cq_;
 };
 
 }

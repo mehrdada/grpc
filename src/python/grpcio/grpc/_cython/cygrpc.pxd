@@ -34,6 +34,7 @@ include "_cygrpc/propagation_bits.pxd.pxi"
 include "_cygrpc/grpc_gevent.pxd.pxi"
 
 include "cygrpz.pxd.pxi"
+include "channel.pxd.pxi"
 
 IF UNAME_SYSNAME != "Windows":
     include "_cygrpc/fork_posix.pxd.pxi"
