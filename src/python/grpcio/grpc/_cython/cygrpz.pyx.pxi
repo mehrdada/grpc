@@ -39,16 +39,12 @@ cdef void _read_metadata_item(grpcpp.string_ref key, grpcpp.string_ref val, void
 cdef void _handle_call(unique_ptr[grpz.ServerCall] call, void* user_data) nogil:
     with gil:
         try:
-            _LOGGER.error("_handle_call2")
             server_call = _ServerCall()
-            _LOGGER.error("_handle_call3")
             running_server = <_RunningServer>user_data
-            _LOGGER.error("_handle_call4")
             (<_ServerCall>server_call)._call.swap(call)
-            _LOGGER.error("_handle_call5")
             running_server.handle_call(server_call)
-        except Exception as ex:
-            _LOGGER.exception(ex)
+        except Exception as exception:
+            _LOGGER.exception(exception)
 
 cdef _find_method_handler(handler_call_details, generic_handlers, interceptor_pipeline):
 
@@ -65,19 +61,22 @@ cdef _find_method_handler(handler_call_details, generic_handlers, interceptor_pi
     else:
         return query_handlers(handler_call_details)
 
+cdef void _handle_with_method_handler(_ServerCall call, method_handler, submit_work):
+    _LOGGER.error('handler found!!!')
+    _LOGGER.error(method_handler)
+    _LOGGER.error(submit_work)
+
 cdef class _RunningServer:
 
-    def __cinit__(self, handlers, interceptors):
+    def __cinit__(self, handlers, interceptors, submit_work):
         self._handlers = handlers
         self._interceptor_pipeline = None # _interceptor.service_pipeline(interceptors)
+        self._submit_work = submit_work
 
     def loop(self):
         def _loop():
-            cdef grpz.Server* server = self._server.get()
-            _LOGGER.error('Starting loop')
             with nogil:
-                server.Loop()
-            _LOGGER.error('stopped loop')
+                self._server.get().Loop()
             cpython.Py_DECREF(self)
 
         self._execution_thread = threading.Thread(target=_loop)
@@ -97,34 +96,27 @@ cdef class _RunningServer:
 
     cdef void handle_call(_RunningServer self, _ServerCall call) except *:
         cdef list metadata = []
-        _LOGGER.error('handle_call(call')
         call._call.get().ReadClientMetadata(_read_metadata_item, <PyObject*>metadata)
         call._method = call._call.get().Method()
         call._metadata = tuple(metadata)
-        method_handler = _find_method_handler(
-            _HandlerCallDetails(call._method, call._metadata),
-            self._handlers, self._interceptor_pipeline)
-        _LOGGER.error('rejecting RPC')
-        call.reject()
-        return
+
         if call._method:
             try:
-                method_handler = _find_method_handler(rpc_event, generic_handlers,
-                                                    interceptor_pipeline)
+                method_handler = _find_method_handler(
+                    _HandlerCallDetails(call._method, call._metadata),
+                    self._handlers, self._interceptor_pipeline)
             except Exception as exception:  # pylint: disable=broad-except
                 details = 'Exception servicing handler: {}'.format(exception)
                 _LOGGER.exception(details)
-                return _reject_rpc(rpc_event, cygrpc.StatusCode.unknown,
-                                b'Error in service handler!'), None
+                call.reject(StatusCode.unknown, b'Error in service handler!')
+                return
+
             if method_handler is None:
-                return _reject_rpc(rpc_event, cygrpc.StatusCode.unimplemented,
-                                b'Method not found!'), None
-            elif concurrency_exceeded:
-                return _reject_rpc(rpc_event, cygrpc.StatusCode.resource_exhausted,
-                                b'Concurrent RPC limit exceeded!'), None
+                call.reject(StatusCode.unimplemented, b'Method not found!')
             else:
-                return _handle_with_method_handler(rpc_event, method_handler,
-                                                thread_pool)
+                _handle_with_method_handler(call, method_handler, self._submit_work)
+        else:
+            call.reject(StatusCode.unimplemented, b'Bad request: no method specified!')
 
 cdef class ServerBuilder:
 
@@ -169,13 +161,13 @@ cdef class ServerBuilder:
         pass
 
     cpdef set_submit_handler(self, handler):
-        pass
+        self._submit_work = handler
 
     cpdef set_thread_count(self, int thread_count):
         pass
 
     cpdef build_and_start(self):
-        cdef _RunningServer running_server = _RunningServer(self._handlers, self._interceptors)
+        cdef _RunningServer running_server = _RunningServer(self._handlers, self._interceptors, self._submit_work)
         cpython.Py_INCREF(running_server)
         running_server._server.swap(grpz.BuildAndStartServer(self._builder, _handle_call, <PyObject*>running_server))
         for bound_port in self._bound_ports:
@@ -198,8 +190,7 @@ cdef class ServerCompat:
                 self._builder.add_option(option, value)
         if maximum_concurrent_rpcs:
             self._builder.set_max_concurrent_rpcs(maximum_concurrent_rpcs)
-        if thread_pool:
-            self._builder.set_submit_handler(thread_pool.submit)
+        self._builder.set_submit_handler(thread_pool.submit)
         self._builder.set_thread_count(4)        
 
     cdef int _add_http2_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds) except *:
@@ -241,5 +232,5 @@ cdef class ServerCompat:
 
 
 cdef class _ServerCall:
-    cdef void reject(_ServerCall self):
+    cdef void reject(_ServerCall self, code, details):
         self._call.get().Reject()

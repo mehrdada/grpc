@@ -32,9 +32,7 @@ void Server::Request(bool ok) {
         auto call = std::move(call_);
         NewCall();
         // TODO: check if concurrency exceeded before calling back into python
-        std::cerr<< "callback_" << std::endl;
         callback_(std::move(call), tag_);
-        std::cerr<< "callback_new_" << std::endl;
     }
 }
 

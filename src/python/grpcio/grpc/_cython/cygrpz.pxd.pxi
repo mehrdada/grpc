@@ -8,13 +8,14 @@ cdef class _ServerCall:
     cdef unique_ptr[grpz.ServerCall] _call
     cdef bytes _method
     cdef tuple _metadata
-    cdef void reject(_ServerCall self)
+    cdef void reject(_ServerCall self, code, details)
 
 cdef class _RunningServer:
     cdef unique_ptr[grpz.Server] _server
     cdef list _handlers
     cdef object _interceptor_pipeline
     cdef object _execution_thread
+    cdef object _submit_work
     cdef void handle_call(_RunningServer self, _ServerCall call) except *
 
 cdef class _BoundPort:
@@ -26,6 +27,7 @@ cdef class ServerBuilder:
     cdef list _bound_ports
     cdef list _handlers
     cdef list _interceptors
+    cdef object _submit_work
     cdef add_port(self, address, shared_ptr[grpcpp.ServerCredentials] creds)
     cpdef add_insecure_port(self, address)
     cpdef add_secure_port(self, address, _ServerCredentialsWrapper credentials)
