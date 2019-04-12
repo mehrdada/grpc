@@ -1,10 +1,12 @@
 cc_library(
 	name = "grpz",
 	hdrs = [
+		"utility.h",
 		"channel.h",
 		"server.h",
 	],
 	srcs = [
+		"utility.cc",
 		"channel.cc",
 		"server.cc",
 	],

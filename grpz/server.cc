@@ -19,20 +19,30 @@ Server::Server(const PrivateConstructor&, grpc::ServerBuilder& builder,
     tag_(tag) {}
 
 void Server::Stop() {
-    //server_->Shutdown();
+    std::cerr << "ServeR::STop()" << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (shutdown_requested_) return;
+        shutdown_requested_ = true;
+    }
+    server_->Shutdown();
+    cq_->Shutdown();
 }
 
 void Server::NewCall() {
     call_ = absl::make_unique<ServerCall>();
-    service_->RequestCall(call_->Context(), call_->Stream(), cq_.get(), cq_.get(), &request_tag_);
+    service_->RequestCall(&call_->Context(), &call_->Stream(), cq_.get(), cq_.get(), &request_tag_);
 }
 
 void Server::Request(bool ok) {
     if (ok) {
         auto call = std::move(call_);
+        call->SetStarted();
         NewCall();
         // TODO: check if concurrency exceeded before calling back into python
+        std::cerr<< "requesT_callback_" << std::endl;
         callback_(std::move(call), tag_);
+        std::cerr<< "requesT_callback_done" << std::endl;
     }
 }
 
@@ -42,17 +52,27 @@ void Server::Loop() {
     bool ok;
     while (cq_->Next(&tag, &ok)) {
         if (tag) {
+            gpr_log(GPR_DEBUG, "tag_recevied: %p", tag);
             static_cast<Tag*>(tag)->Handle(ok);
         }
+    }
+    try {
+
+    std::unique_lock<std::mutex> lock(mu_);
+    shut_down_ = true;
+    shut_down_cv_.notify_all();
+    } catch (std::exception ex) {
+        std::cerr<< "xxx"<< std::endl;
     }
 }
 
 Server::~Server(){
     Stop();
-    void* tag;
-    bool ok;
-    while (cq_->Next(&tag, &ok));
-    cq_->Shutdown();
+    call_.reset();
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!shut_down_) {
+        shut_down_cv_.wait(lock, [&] { return shut_down_; });
+    }
 }
 
   std::unique_ptr<Server> BuildAndStartServer(grpc::ServerBuilder& builder, std::function<void(std::unique_ptr<ServerCall>, void*)> callback, void* tag){

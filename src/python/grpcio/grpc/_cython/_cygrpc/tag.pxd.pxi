@@ -47,12 +47,3 @@ cdef class _BatchOperationTag(_Tag):
   cdef void prepare(self) except *
   cdef BatchOperationEvent event(self, grpc_event c_event)
 
-
-cdef class _ServerShutdownTag(_Tag):
-
-  cdef readonly object _user_tag
-  # This allows CompletionQueue to notify the Python Server object that the
-  # underlying GRPC core server has shutdown
-  cdef readonly Server _shutting_down_server
-
-  cdef ServerShutdownEvent event(self, grpc_event c_event)

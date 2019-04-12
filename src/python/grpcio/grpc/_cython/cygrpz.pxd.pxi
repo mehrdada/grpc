@@ -4,11 +4,24 @@ from libcpp.memory cimport shared_ptr, unique_ptr
 cimport grpcpp
 cimport grpz
 
+cdef class Server:
+    pass
+
 cdef class _ServerCall:
     cdef unique_ptr[grpz.ServerCall] _call
+    cdef object _submit_work
     cdef bytes _method
     cdef tuple _metadata
+    cdef object _read_callback
+    cdef object _write_callback
     cdef void reject(_ServerCall self, code, details)
+    cdef void async_read(_ServerCall self, continuation) except *
+    cdef void async_write(_ServerCall self, bytes buffer, continuation) except *
+    cdef void async_write_and_finish(_ServerCall self, bytes buffer, continuation) except *
+    cdef void async_finish(_ServerCall self, continuation) except *
+    cdef void _on_read(_ServerCall self, bint ok, bytes message)
+    cdef void _on_write(_ServerCall self, bint ok)
+    cpdef invocation_metadata(_ServerCall self)
 
 cdef class _RunningServer:
     cdef unique_ptr[grpz.Server] _server

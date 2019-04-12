@@ -75,13 +75,3 @@ cdef class _BatchOperationTag:
       return BatchOperationEvent(
           c_event.type, c_event.success, self._user_tag, ())
 
-
-cdef class _ServerShutdownTag(_Tag):
-
-  def __cinit__(self, user_tag, shutting_down_server):
-    self._user_tag = user_tag
-    self._shutting_down_server = shutting_down_server
-
-  cdef ServerShutdownEvent event(self, grpc_event c_event):
-    self._shutting_down_server.notify_shutdown_complete()
-    return ServerShutdownEvent(c_event.type, c_event.success, self._user_tag)

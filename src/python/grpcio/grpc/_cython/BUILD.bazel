@@ -37,8 +37,6 @@ pyx_library(
         "_cygrpc/records.pyx.pxi",
         "_cygrpc/security.pxd.pxi",
         "_cygrpc/security.pyx.pxi",
-        "_cygrpc/server.pxd.pxi",
-        "_cygrpc/server.pyx.pxi",
         "_cygrpc/tag.pxd.pxi",
         "_cygrpc/tag.pyx.pxi",
         "_cygrpc/time.pxd.pxi",
