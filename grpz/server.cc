@@ -25,6 +25,7 @@ void Server::Stop() {
         if (shutdown_requested_) return;
         shutdown_requested_ = true;
     }
+    call_.reset();
     server_->Shutdown();
     cq_->Shutdown();
 }
@@ -56,19 +57,13 @@ void Server::Loop() {
             static_cast<Tag*>(tag)->Handle(ok);
         }
     }
-    try {
-
     std::unique_lock<std::mutex> lock(mu_);
     shut_down_ = true;
     shut_down_cv_.notify_all();
-    } catch (std::exception ex) {
-        std::cerr<< "xxx"<< std::endl;
-    }
 }
 
 Server::~Server(){
     Stop();
-    call_.reset();
     std::unique_lock<std::mutex> lock(mu_);
     if (!shut_down_) {
         shut_down_cv_.wait(lock, [&] { return shut_down_; });

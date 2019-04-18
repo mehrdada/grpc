@@ -14,7 +14,6 @@ cdef extern from "grpz/server.h" namespace "grpz" nogil:
     cppclass Server:
         void Loop() except +
     cppclass ServerCall:
-        const std_string& Method() except +
         void ReadClientMetadata(void(grpcpp.string_ref, grpcpp.string_ref, void*), void* tag) except +
         void Reject() except +
         bint AsyncRead(void(ServerCall*, bint, grpcpp.ByteBuffer, void*), void* user_data) except +

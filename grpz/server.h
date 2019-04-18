@@ -33,9 +33,7 @@ class ServerCall {
   grpc::GenericServerContext& Context() {
       return context_;
   }
-  const std::string& Method() {
-    return context_.method();
-  }
+
   void Reject() {
     std::cerr<< "RejecT()"<<std::endl;
     stream_.Finish(grpc::Status::CANCELLED, nullptr);
