@@ -21,6 +21,35 @@ class Tag {
   std::function<void(bool)> fn_;
 };
 
+template<class CQ>
+class CompletionQueueWatcher {
+ public:
+  explicit CompletionQueueWatcher(std::unique_ptr<CQ> cq) : cq_(std::move(cq)) {}
+  CQ* CompletionQueue() {
+    return cq_.get();
+  }
+  void Start() {
+    pthread_create(&thread_, nullptr, &CompletionQueueWatcher<CQ>::Loop, this);
+  }
+  void Shutdown() {
+    cq_->Shutdown();
+  }
+  ~CompletionQueueWatcher() {
+    
+  }
+ private:
+  void Loop() {
+
+  }
+  static void Loop(void* self) {
+    (CompletionQueueWatcher<CQ>*self)->Loop();
+  }
+  pthread_t thread_;
+  std::unique_ptr<CQ> cq_;
+};
+
+typedef CompletionQueueWatcher<grpc::ServerCompletionQueue> ServerCompletionQueueWatcher;
+
 class ServerCall {
  public:
   ServerCall() {
@@ -191,7 +220,7 @@ class Server {
  public:
   class PrivateConstructor;
   Server(const PrivateConstructor&, grpc::ServerBuilder& builder, 
-         std::unique_ptr<grpc::ServerCompletionQueue> cq,
+         std::vector<ServerCompletionQueueWatcher> cq_watchers,
          std::unique_ptr<grpc::AsyncGenericService> service,
          std::function<void(std::unique_ptr<ServerCall>, void*)> callback, void* tag);
   ~Server();
@@ -201,10 +230,11 @@ class Server {
  private:
   void Request(bool ok);
   void NewCall();
+  grpc::ServerCompletionQueue* CompletionQueue();
   Tag request_tag_ = Tag([this](bool ok) { Request(ok); });
   std::unique_ptr<grpc::Server> server_;
-  std::unique_ptr<grpc::ServerCompletionQueue> cq_;
-                 std::unique_ptr<grpc::AsyncGenericService> service_;
+  std::vector<ServerCompletionQueueWatcher> cq_watchers_;
+  std::unique_ptr<grpc::AsyncGenericService> service_;
   std::function<void(std::unique_ptr<ServerCall>, void*)> callback_;
   void* tag_;
   std::unique_ptr<ServerCall> call_;
