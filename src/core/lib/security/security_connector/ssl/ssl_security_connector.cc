@@ -95,7 +95,6 @@ class grpc_ssl_channel_security_connector final
         static_cast<grpc_ssl_credentials*>(mutable_channel_creds())
             ->TryFetchCertConfig();
     tsi_ssl_client_handshaker_options options;
-    memset(&options, 0, sizeof(options));
     if (!fill_ssl_client_handshaker_options(versioned_config.config,
                                             session_cache_, &options)) {
       return GRPC_SECURITY_ERROR;
@@ -261,7 +260,6 @@ class grpc_ssl_channel_security_connector final
             config.config.get(), config.version);
 
     tsi_ssl_client_handshaker_options options;
-    memset(&options, 0, sizeof(options));
     if (!fill_ssl_client_handshaker_options(config.config, session_cache_,
                                             &options)) {
       return false;
